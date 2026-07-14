@@ -1,0 +1,1 @@
+implement a Brainfuck interpreter for the fixed source program ++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.; use a zero-initialized 30000-byte wrapping tape, validate bracket matching, print the program output, and exit 0 or report interpreter errors on standard error and exit 1

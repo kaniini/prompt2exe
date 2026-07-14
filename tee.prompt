@@ -1,0 +1,1 @@
+copy standard input to both standard output and a file named shellcode-output.bin, creating or truncating the file with ordinary user-readable permissions; correctly handle partial reads and writes, close the file, and print a useful diagnostic to standard error and exit 1 on any failure

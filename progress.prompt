@@ -1,0 +1,1 @@
+draw an in-place terminal progress bar from 0 percent through 100 percent in steps of 5 using carriage returns and a short operating-system sleep between frames, finish with a newline, and handle sleep and output errors with a diagnostic on standard error and exit 1

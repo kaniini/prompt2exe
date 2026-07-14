@@ -1,0 +1,1 @@
+on x86-64, use the CPUID instruction to print the CPU vendor string, the highest supported basic CPUID leaf in hexadecimal, and whether SSE2, AVX, and AVX2 are supported; account for OSXSAVE and XGETBV before reporting AVX or AVX2 usable, then exit 0

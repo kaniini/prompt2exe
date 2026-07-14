@@ -1,0 +1,1 @@
+print each command-line argument on its own line prefixed by its zero-based index and a colon, including the program name as argument 0, then exit 0; report malformed process startup state on standard error and exit 1

@@ -1,0 +1,1 @@
+read standard input and produce a canonical hex dump with 16 bytes per row: an eight-digit hexadecimal byte offset, two columns of eight space-separated hexadecimal bytes, and a printable ASCII column using dots for non-printable bytes; handle a partial final row and all I/O errors, then exit 0 on success or 1 on failure

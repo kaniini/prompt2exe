@@ -1,0 +1,1 @@
+obtain randomness from the operating system and print ten unbiased six-sided dice rolls as decimal numbers from 1 through 6, one per line; use rejection sampling rather than modulo bias, and report entropy or output failures on standard error and exit 1

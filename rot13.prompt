@@ -1,0 +1,1 @@
+stream standard input to standard output while applying ROT13 to ASCII letters and leaving every other byte unchanged; handle short reads, short writes, and interrupted operations correctly, and print a diagnostic to standard error and exit 1 on an unrecoverable I/O error

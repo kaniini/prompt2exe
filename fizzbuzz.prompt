@@ -1,0 +1,1 @@
+print the numbers 1 through 100, replacing multiples of 3 with fizz, multiples of 5 with buzz, and multiples of both with fizzbuzz, one result per line, then exit 0
