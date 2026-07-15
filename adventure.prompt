@@ -1,0 +1,9 @@
+implement a text adventure game that uses the terminal and uses north, east, west and south to traverse rooms.
+
+the theme of the story should be conspiracy theory meets cyberspace thriller.
+
+it should use the full size of the terminal and exit 0 on success.
+
+the program should not segfault or produce illegal instruction errors.
+
+the program should handle the terminal correctly.
