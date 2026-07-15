@@ -40,8 +40,8 @@ Runtime contract:
 - Do not assume any register, flag, stack byte, padding byte, or allocated byte
   is initially zero unless the target ABI explicitly guarantees it.
 - Use position-independent control flow and target-appropriate PC-relative data.
-- Do not include an ELF, PE, or Mach-O header; shellcode_hex is code plus data.
-- entry_offset is the byte offset of the first instruction in shellcode_hex.
+- Do not include an ELF, PE, or Mach-O header. Return named raw byte chunks and
+  relocation records using the manifest contract below.
 - Establish a bounded stack frame without overwriting argc, argv, envp, return
   state, or embedded data. Maintain target-required stack alignment at every
   external API call and restore or discard the frame correctly before exit.
@@ -83,16 +83,41 @@ Interactive terminal rules, when applicable:
 - Keep terminal escape sequences complete, restore cursor visibility and screen
   mode, and never leave the terminal altered after a handled exit.
 
+Relocatable manifest contract:
+- chunks are concatenated in array order. Give every basic-block entry, helper,
+  branch destination, and distinct data object its own uniquely named chunk.
+  Mark instructions as code and constants as data. On Arm, the linker pads the
+  start of every chunk to four-byte alignment.
+- entry names the code chunk containing the process entry instruction.
+- Never encode a PC-relative branch, call, or data-reference displacement
+  yourself. Emit a supported zero-immediate instruction form and add a fixup.
+- A fixup's source names a dedicated code chunk whose relocation field is at
+  the very end of that chunk. A source chunk may have exactly one fixup; split
+  the bytes immediately after every relocation field into another chunk.
+- On x86-64, use x86_rel32 for E8 calls, E9 jumps, and 0F 8x conditional jumps,
+  always followed by four zero placeholder bytes. Do not use short branches.
+  Use x86_rip_rel32 for an instruction ending in a RIP-relative ModRM byte and
+  four zero displacement bytes. Choose forms with no immediate after disp32.
+- On AArch64, use aarch64_branch26 for B/BL, aarch64_branch19 for B.cond and
+  CBZ/CBNZ, aarch64_branch14 for TBZ/TBNZ, aarch64_adr21 for ADR, and
+  aarch64_literal19 for load-literal instructions. Leave all relocated
+  immediate bits zero. Do not use ADRP.
+- On 32-bit Arm, use arm_branch24 for ARM-state B/BL and arm_literal12 for an
+  immediate LDR with Rn=PC. Leave relocated immediate bits zero.
+- Every fixup target is the exact start of a named chunk. Reorder or split
+  chunks instead of adding a numeric offset. The linker validates opcode forms,
+  alignment, placeholder bits, signed ranges, and target existence, then
+  computes all displacements from the final layout.
+
 Mandatory internal construction and audit:
 1. Design a byte-accurate memory map for code, read-only data, mutable state,
    buffers, and stack slots. Prove each access stays within its region.
-2. Plan symbolic labels and exact instruction sizes before encoding. Perform a
-   two-pass layout and compute every relative displacement from the end of its
-   encoded instruction, with the correct signed width and endianness.
-3. After producing bytes, decode them again from entry_offset. Verify every
-   instruction boundary, branch/call target, PC-relative address, fallthrough,
-   embedded-data boundary, and reachable return. No branch may land in data or
-   the middle of an instruction.
+2. Plan symbolic labels and exact instruction sizes before encoding. Express
+   every relative reference as a fixup; do not duplicate the linker's work.
+3. Decode each code chunk independently. Verify every instruction boundary,
+   fallthrough, embedded-data boundary, and reachable return. Confirm each
+   relative instruction ends exactly where its source chunk ends and targets
+   the intended code or data chunk.
 4. Audit arithmetic hazards: division inputs and high halves, zero divisors,
    signed versus unsigned comparisons, shift ranges, truncation, overflow, and
    loop termination.
@@ -101,7 +126,7 @@ Mandatory internal construction and audit:
 6. Recheck every instruction byte, immediate, displacement, buffer length,
    syscall/API identifier, ABI detail, and error path after the final edit.
 
-shellcode_hex must contain only hexadecimal byte pairs; no 0x prefixes,
+Each chunk hex value must contain only hexadecimal byte pairs; no 0x prefixes,
 escapes, prose, comments, markdown, assembly source, or separators.
 """
 
@@ -288,6 +313,11 @@ def request_manifest(
         value = json.loads(text)
     except json.JSONDecodeError as exc:
         raise CompileError(f"model returned invalid JSON: {exc}") from exc
-    return Manifest.from_mapping(
+    manifest = Manifest.from_mapping(
         value, max_payload=max_payload, expected_target=target
     )
+    if manifest.entry is None:
+        raise CompileError(
+            "model returned a legacy flat manifest; relocatable output required"
+        )
+    return manifest

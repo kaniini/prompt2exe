@@ -1,9 +1,16 @@
 ## prompt2exe
 
-`prompt2exe` asks an OpenAI model for a validated JSON shellcode manifest
-and wraps the returned bytes in a target-native executable container. It uses
-the Responses API directly through Python's standard library, so it has no
-package dependencies.
+`prompt2exe` asks an OpenAI model for a validated JSON machine-code manifest
+and wraps the linked bytes in a target-native executable container. It uses the
+Responses API directly through Python's standard library, so it has no package
+dependencies and invokes no assembler, compiler, or system linker.
+
+Generated manifests contain ordered, named code/data chunks and symbolic
+fixups. The built-in relocation layer calculates branch, call, and PC-relative
+data displacements after layout, and rejects invalid opcode forms, placeholders,
+labels, alignment, and ranges. Existing flat `shellcode_hex` manifests remain
+supported for offline compatibility, but new model output uses the relocatable
+format.
 
 ```sh
 # Create a key at https://platform.openai.com/api-keys, then:
@@ -53,10 +60,10 @@ The API socket timeout defaults to 15 minutes for complex reasoning requests;
 use `--timeout SECONDS` to increase it further.
 
 Prompt builds use one independent model verification pass by default. The
-reviewer decodes the candidate bytes, recomputes branch targets, and may replace
-an implementation it cannot prove correct. This doubles model requests and
-token use. Use `--verify-passes 0` for the original single-call behavior, or up
-to `--verify-passes 3` for especially difficult programs.
+reviewer decodes each code chunk, checks relocation coverage and target kinds,
+and may replace an implementation it cannot prove correct. This doubles model
+requests and token use. Use `--verify-passes 0` for the original single-call
+behavior, or up to `--verify-passes 3` for especially difficult programs.
 
 An offline manifest mode makes byte wrapping deterministic and does not require
 network access:
@@ -66,14 +73,14 @@ python3 -m prompt2exe \
   --manifest hello.manifest.json -o generated
 ```
 
-The compiler validates target compatibility, hexadecimal encoding, entry
-bounds and alignment, payload size, nested executable headers, base-address
-alignment, and overwrite behavior. It does not claim that arbitrary generated
-machine code is semantically correct.
+The compiler validates target compatibility, hexadecimal encoding, labels,
+fixup opcodes and ranges, entry bounds and alignment, payload size, nested
+executable headers, base-address alignment, and overwrite behavior. It does
+not claim that arbitrary generated machine code is semantically correct.
 Generated files are never executed unless `--run` is supplied explicitly; use
 that option only in an appropriately isolated environment.
 
-The implementation is split by responsibility under `prompt2exe/`:
-target definitions, manifest validation, API transport, CLI handling, output
-I/O, and independent ELF, PE, and Mach-O emitters. Invoke it with
-`python3 -m prompt2exe --help`.
+The implementation is split by responsibility under `prompt2exe/`: target
+definitions, manifest validation, relocation linking, API transport, CLI
+handling, output I/O, and independent ELF, PE, and Mach-O emitters. Invoke it
+with `python3 -m prompt2exe --help`.

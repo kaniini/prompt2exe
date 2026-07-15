@@ -34,6 +34,42 @@ def hello_mapping(architecture="x86_64-linux", shellcode_hex=HELLO_HEX):
     }
 
 
+def reloc_mapping(architecture, chunks, fixups=(), entry="entry"):
+    return {
+        "architecture": architecture,
+        "chunks": chunks,
+        "entry": entry,
+        "fixups": list(fixups),
+        "description": "relocation test",
+    }
+
+
+def reloc_hello_mapping():
+    return reloc_mapping(
+        "x86_64-linux",
+        [
+            {
+                "label": "entry",
+                "kind": "code",
+                "hex": "b801000000bf01000000488d3500000000",
+            },
+            {
+                "label": "write_and_exit",
+                "kind": "code",
+                "hex": "ba0b0000000f05b83c00000031ff0f05",
+            },
+            {"label": "message", "kind": "data", "hex": "68656c6c6f20776f726c64"},
+        ],
+        [
+            {
+                "source": "entry",
+                "kind": "x86_rip_rel32",
+                "target": "message",
+            }
+        ],
+    )
+
+
 class ManifestTests(unittest.TestCase):
     def test_accepts_whitespace_in_hex(self):
         value = hello_mapping()
@@ -67,14 +103,221 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(compiler.CompileError, "Mach-O"):
             compiler.Manifest.from_mapping(macho)
 
+    def test_links_x86_branch_and_rip_relative_data(self):
+        value = reloc_mapping(
+            "x86_64-linux",
+            [
+                {"label": "entry", "kind": "code", "hex": "e900000000"},
+                {"label": "dead", "kind": "code", "hex": "90"},
+                {
+                    "label": "target",
+                    "kind": "code",
+                    "hex": "488d0500000000",
+                },
+                {"label": "done", "kind": "code", "hex": "c3"},
+                {"label": "message", "kind": "data", "hex": "6869"},
+            ],
+            [
+                {"source": "entry", "kind": "x86_rel32", "target": "target"},
+                {
+                    "source": "target",
+                    "kind": "x86_rip_rel32",
+                    "target": "message",
+                },
+            ],
+        )
+
+        manifest = compiler.Manifest.from_mapping(value)
+
+        self.assertEqual(manifest.shellcode[:5], bytes.fromhex("e901000000"))
+        self.assertEqual(manifest.shellcode[6:13], bytes.fromhex("488d0501000000"))
+        self.assertEqual(manifest.as_json(), value)
+
+    def test_links_backward_x86_branch(self):
+        value = reloc_mapping(
+            "x86_64-linux",
+            [
+                {"label": "target", "kind": "code", "hex": "90"},
+                {"label": "entry", "kind": "code", "hex": "e900000000"},
+            ],
+            [{"source": "entry", "kind": "x86_rel32", "target": "target"}],
+        )
+
+        manifest = compiler.Manifest.from_mapping(value)
+
+        self.assertEqual(manifest.entry_offset, 1)
+        self.assertEqual(manifest.shellcode, bytes.fromhex("90e9faffffff"))
+
+    def test_rejects_bad_x86_relocation_opcode_and_placeholder(self):
+        cases = (
+            ("9000000000", "must end in E8/E9"),
+            ("e901000000", "placeholder must be"),
+        )
+        for machine_code, message in cases:
+            with self.subTest(machine_code=machine_code):
+                value = reloc_mapping(
+                    "x86_64-linux",
+                    [
+                        {"label": "entry", "kind": "code", "hex": machine_code},
+                        {"label": "target", "kind": "code", "hex": "c3"},
+                    ],
+                    [
+                        {
+                            "source": "entry",
+                            "kind": "x86_rel32",
+                            "target": "target",
+                        }
+                    ],
+                )
+                with self.assertRaisesRegex(compiler.CompileError, message):
+                    compiler.Manifest.from_mapping(value)
+
+    def test_rejects_reused_or_unknown_fixup_labels(self):
+        base_chunks = [
+            {"label": "entry", "kind": "code", "hex": "e900000000"},
+            {"label": "target", "kind": "code", "hex": "c3"},
+        ]
+        reused = reloc_mapping(
+            "x86_64-linux",
+            base_chunks,
+            [
+                {"source": "entry", "kind": "x86_rel32", "target": "target"},
+                {"source": "entry", "kind": "x86_rel32", "target": "target"},
+            ],
+        )
+        unknown = reloc_mapping(
+            "x86_64-linux",
+            base_chunks,
+            [{"source": "entry", "kind": "x86_rel32", "target": "missing"}],
+        )
+        with self.assertRaisesRegex(compiler.CompileError, "more than one fixup"):
+            compiler.Manifest.from_mapping(reused)
+        with self.assertRaisesRegex(compiler.CompileError, "unknown target"):
+            compiler.Manifest.from_mapping(unknown)
+
+    def test_rejects_branch_to_data(self):
+        value = reloc_mapping(
+            "x86_64-linux",
+            [
+                {"label": "entry", "kind": "code", "hex": "e900000000"},
+                {"label": "bytes", "kind": "data", "hex": "00"},
+            ],
+            [{"source": "entry", "kind": "x86_rel32", "target": "bytes"}],
+        )
+
+        with self.assertRaisesRegex(compiler.CompileError, "branch target must be"):
+            compiler.Manifest.from_mapping(value)
+
+    def test_links_aarch64_branch_and_adr(self):
+        value = reloc_mapping(
+            "aarch64-linux",
+            [
+                {"label": "entry", "kind": "code", "hex": "00000014"},
+                {"label": "dead", "kind": "code", "hex": "1f2003d5"},
+                {"label": "target", "kind": "code", "hex": "00000010"},
+                {"label": "message", "kind": "data", "hex": "6869"},
+            ],
+            [
+                {
+                    "source": "entry",
+                    "kind": "aarch64_branch26",
+                    "target": "target",
+                },
+                {
+                    "source": "target",
+                    "kind": "aarch64_adr21",
+                    "target": "message",
+                },
+            ],
+        )
+
+        manifest = compiler.Manifest.from_mapping(value)
+
+        self.assertEqual(manifest.shellcode[:4], bytes.fromhex("02000014"))
+        self.assertEqual(manifest.shellcode[8:12], bytes.fromhex("20000010"))
+
+    def test_links_aarch64_conditional_test_and_literal_fixups(self):
+        cases = (
+            ("00000054", "aarch64_branch19", "40000054", "code", "c0035fd6"),
+            ("00000036", "aarch64_branch14", "40000036", "code", "c0035fd6"),
+            ("00000058", "aarch64_literal19", "20000058", "data", "78563412"),
+        )
+        for instruction, kind, expected, target_kind, target_hex in cases:
+            with self.subTest(kind=kind):
+                value = reloc_mapping(
+                    "aarch64-linux",
+                    [
+                        {"label": "entry", "kind": "code", "hex": instruction},
+                        {"label": "middle", "kind": "code", "hex": "1f2003d5"}
+                        if target_kind == "code"
+                        else {
+                            "label": "target",
+                            "kind": target_kind,
+                            "hex": target_hex,
+                        },
+                        {"label": "target", "kind": target_kind, "hex": target_hex}
+                        if target_kind == "code"
+                        else {"label": "tail", "kind": "data", "hex": "00"},
+                    ],
+                    [{"source": "entry", "kind": kind, "target": "target"}],
+                )
+
+                manifest = compiler.Manifest.from_mapping(value)
+
+                self.assertEqual(manifest.shellcode[:4], bytes.fromhex(expected))
+
+    def test_links_arm_branch_and_negative_literal(self):
+        branch = reloc_mapping(
+            "arm-linux",
+            [
+                {"label": "entry", "kind": "code", "hex": "000000ea"},
+                {"label": "dead1", "kind": "code", "hex": "0000a0e1"},
+                {"label": "dead2", "kind": "code", "hex": "0000a0e1"},
+                {"label": "target", "kind": "code", "hex": "1eff2fe1"},
+            ],
+            [{"source": "entry", "kind": "arm_branch24", "target": "target"}],
+        )
+        literal = reloc_mapping(
+            "arm-linux",
+            [
+                {"label": "word", "kind": "data", "hex": "78563412"},
+                {"label": "entry", "kind": "code", "hex": "00009fe5"},
+            ],
+            [{"source": "entry", "kind": "arm_literal12", "target": "word"}],
+        )
+
+        self.assertEqual(
+            compiler.Manifest.from_mapping(branch).shellcode[:4],
+            bytes.fromhex("010000ea"),
+        )
+        self.assertEqual(
+            compiler.Manifest.from_mapping(literal).shellcode[4:8],
+            bytes.fromhex("0c001fe5"),
+        )
+
+    def test_arm_linker_aligns_code_after_data(self):
+        value = reloc_mapping(
+            "aarch64-linux",
+            [
+                {"label": "byte", "kind": "data", "hex": "ff"},
+                {"label": "entry", "kind": "code", "hex": "c0035fd6"},
+            ],
+        )
+
+        manifest = compiler.Manifest.from_mapping(value)
+
+        self.assertEqual(manifest.entry_offset, 4)
+        self.assertEqual(manifest.shellcode, bytes.fromhex("ff000000c0035fd6"))
+
     def test_review_prompt_distrusts_candidate_branch_encodings(self):
         candidate = compiler.Manifest.from_mapping(hello_mapping())
 
         prompt = build_review_prompt("print hello", candidate, 1)
 
         self.assertIn("candidate below is untrusted", prompt)
-        self.assertIn("offset ledger containing every instruction", prompt)
-        self.assertIn("recompute its signed displacement", prompt)
+        self.assertIn("instruction-boundary ledger", prompt)
+        self.assertIn("supported fixup", prompt)
+        self.assertIn("deterministic linker", prompt)
         self.assertIn("zero terminal dimensions", prompt)
         self.assertIn(candidate.shellcode.hex(), prompt)
 
@@ -353,7 +596,10 @@ class ApiResponseTests(unittest.TestCase):
                 {
                     "type": "message",
                     "content": [
-                        {"type": "output_text", "text": json.dumps(hello_mapping())}
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(reloc_hello_mapping()),
+                        }
                     ],
                 }
             ]
@@ -382,13 +628,18 @@ class ApiResponseTests(unittest.TestCase):
             body["text"]["format"]["schema"]["properties"]["architecture"]["enum"],
             ["x86_64-linux"],
         )
+        schema = body["text"]["format"]["schema"]
+        self.assertIn("chunks", schema["properties"])
+        self.assertIn("fixups", schema["properties"])
+        self.assertNotIn("shellcode_hex", schema["properties"])
         self.assertFalse(body["store"])
         self.assertNotIn("stream", body)
         self.assertEqual(body["text"]["format"]["type"], "json_schema")
         instructions = body["instructions"]
         self.assertIn("readable and executable but not writable", instructions)
-        self.assertIn("two-pass layout", instructions)
-        self.assertIn("decode them again from entry_offset", instructions)
+        self.assertIn("symbolic labels and exact instruction sizes", instructions)
+        self.assertIn("Never encode a PC-relative branch", instructions)
+        self.assertIn("linker validates opcode forms", instructions)
         self.assertIn("restore that exact state on every exit", instructions)
         self.assertIn("SYSCALL clobbers RCX and R11", instructions)
         self.assertEqual(manifest.shellcode, bytes.fromhex(HELLO_HEX))
@@ -400,7 +651,10 @@ class ApiResponseTests(unittest.TestCase):
                 {
                     "type": "message",
                     "content": [
-                        {"type": "output_text", "text": json.dumps(hello_mapping())}
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(reloc_hello_mapping()),
+                        }
                     ],
                 }
             ],

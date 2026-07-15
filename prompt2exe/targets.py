@@ -71,17 +71,18 @@ not require ISA extensions beyond the x86-64 baseline.
 Target: Linux AArch64, little-endian A64 instructions. Use the Linux AArch64
 syscall ABI: syscall number in X8, arguments in X0 through X5, and SVC #0. At
 entry, SP contains argc, argv, and envp; other registers are undefined. Keep
-SP 16-byte aligned, keep instructions 4-byte aligned, treat Linux -errno
-results as failures, and use ADR/ADRP or literal addressing with fully checked
-page and immediate ranges.
+SP 16-byte aligned, keep instructions 4-byte aligned, and treat Linux -errno
+results as failures. Use linker fixups for every branch and ADR or literal data
+reference; do not use ADRP.
 """,
     "arm-linux": """\
 Target: Linux 32-bit Arm EABI, little-endian ARM instruction state (not Thumb).
 Use R7 for the syscall number, R0 through R6 for arguments, and SVC #0. At
 entry, SP contains argc, argv, and envp; other registers are undefined. Keep
 instructions 4-byte aligned, treat Linux -errno results as failures, account
-for the ARM PC pipeline in data access, and do not emit Thumb instructions or
-optional architecture extensions.
+for the ARM PC pipeline in data access, and use linker fixups for every branch
+and PC-relative literal load. Do not emit Thumb instructions or optional
+architecture extensions.
 """,
     "x86_64-windows": """\
 Target: 64-bit Windows x64 using the Microsoft x64 ABI. The PE has no import
@@ -109,7 +110,8 @@ position-independent code. The Mach-O image has no imported symbols. Use the
 Darwin ARM64 BSD syscall convention with the syscall number in X16, arguments
 in X0 onward, and SVC #0x80. Keep instructions 4-byte aligned and terminate
 with the Darwin exit syscall. Check the Darwin carry-flag error convention,
-keep SP 16-byte aligned, and verify every ADR/ADRP, literal, and branch range.
+keep SP 16-byte aligned, and use linker fixups for every branch and ADR or
+literal data reference; do not use ADRP.
 """,
 }
 
