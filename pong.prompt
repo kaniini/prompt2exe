@@ -1,0 +1,9 @@
+implement a pong game that uses the terminal and has an CPU opponent, up and down keys for moving the paddle up and down.
+
+it should use the full size of the terminal and exit 0 on success.
+
+it should display the score in large text for both players.
+
+the program should not segfault or produce illegal instruction errors.
+
+the program should handle the terminal correctly.
