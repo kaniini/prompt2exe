@@ -12,8 +12,9 @@ from .api import DEFAULT_API_BASE, DEFAULT_MODEL, request_manifest
 from .errors import CompileError
 from .flow import TerminalFlowWriter
 from .formats import build_executable
-from .manifest import DEFAULT_MAX_PAYLOAD
+from .manifest import DEFAULT_MAX_PAYLOAD, Manifest
 from .output import load_manifest, write_executable, write_manifest
+from .review import build_review_prompt
 from .targets import ARCH_ALIASES, Target, resolve_target
 from .throbber import Throbber
 
@@ -61,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-payload", type=parse_int, default=DEFAULT_MAX_PAYLOAD)
     parser.add_argument("--base-address", type=parse_int)
+    parser.add_argument(
+        "--verify-passes",
+        type=int,
+        default=1,
+        help="independent model verification passes (default: 1; maximum: 3)",
+    )
     parser.add_argument("--force", action="store_true", help="replace existing outputs")
     parser.add_argument(
         "--run", action="store_true", help="execute the generated file after writing it"
@@ -122,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
             raise CompileError("--max-payload must be positive")
         if args.timeout <= 0:
             raise CompileError("--timeout must be positive")
+        if not 0 <= args.verify_passes <= 3:
+            raise CompileError("--verify-passes must be between 0 and 3")
         if args.manifest is not None:
             if args.prompt is not None or args.prompt_file is not None:
                 raise CompileError(
@@ -152,33 +161,41 @@ def main(argv: list[str] | None = None) -> int:
                     "  export OPENAI_API_KEY='your-api-key'\n\n"
                     "Keep the key secret; do not commit or share it."
                 )
-            with Throbber(
-                "Progress",
-                stream=sys.stderr,
-                enabled=not args.quiet and sys.stderr.isatty(),
-            ) as throbber:
-                reasoning_output = TerminalFlowWriter(
-                    stream=sys.stderr, prefix="progress: "
-                )
-
-                def show_reasoning(delta: str) -> None:
-                    throbber.stop()
-                    reasoning_output.write(delta)
-
-                try:
-                    manifest = request_manifest(
-                        prompt,
-                        target=target,
-                        api_key=api_key,
-                        model=args.model,
-                        api_base=args.api_base,
-                        timeout=args.timeout,
-                        reasoning_effort=args.reasoning,
-                        max_payload=args.max_payload,
-                        on_reasoning_delta=None if args.quiet else show_reasoning,
+            def model_pass(model_prompt: str, status: str) -> Manifest:
+                with Throbber(
+                    status,
+                    stream=sys.stderr,
+                    enabled=not args.quiet and sys.stderr.isatty(),
+                ) as throbber:
+                    reasoning_output = TerminalFlowWriter(
+                        stream=sys.stderr, prefix="progress: "
                     )
-                finally:
-                    reasoning_output.finish()
+
+                    def show_reasoning(delta: str) -> None:
+                        throbber.stop()
+                        reasoning_output.write(delta)
+
+                    try:
+                        return request_manifest(
+                            model_prompt,
+                            target=target,
+                            api_key=api_key,
+                            model=args.model,
+                            api_base=args.api_base,
+                            timeout=args.timeout,
+                            reasoning_effort=args.reasoning,
+                            max_payload=args.max_payload,
+                            on_reasoning_delta=None if args.quiet else show_reasoning,
+                        )
+                    finally:
+                        reasoning_output.finish()
+
+            manifest = model_pass(prompt, "Generating")
+            for pass_number in range(1, args.verify_passes + 1):
+                review_prompt = build_review_prompt(prompt, manifest, pass_number)
+                manifest = model_pass(
+                    review_prompt, f"Verifying {pass_number}/{args.verify_passes}"
+                )
 
         output = args.output
         if output is None:

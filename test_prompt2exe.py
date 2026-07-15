@@ -15,6 +15,7 @@ import prompt2exe as compiler
 from prompt2exe import api as compiler_api
 from prompt2exe import cli as compiler_cli
 from prompt2exe.flow import TerminalFlowWriter, display_width
+from prompt2exe.review import build_review_prompt
 from prompt2exe.throbber import Throbber
 
 
@@ -65,6 +66,17 @@ class ManifestTests(unittest.TestCase):
             compiler.Manifest.from_mapping(pe)
         with self.assertRaisesRegex(compiler.CompileError, "Mach-O"):
             compiler.Manifest.from_mapping(macho)
+
+    def test_review_prompt_distrusts_candidate_branch_encodings(self):
+        candidate = compiler.Manifest.from_mapping(hello_mapping())
+
+        prompt = build_review_prompt("print hello", candidate, 1)
+
+        self.assertIn("candidate below is untrusted", prompt)
+        self.assertIn("offset ledger containing every instruction", prompt)
+        self.assertIn("recompute its signed displacement", prompt)
+        self.assertIn("zero terminal dimensions", prompt)
+        self.assertIn(candidate.shellcode.hex(), prompt)
 
 
 class ElfTests(unittest.TestCase):
@@ -373,6 +385,12 @@ class ApiResponseTests(unittest.TestCase):
         self.assertFalse(body["store"])
         self.assertNotIn("stream", body)
         self.assertEqual(body["text"]["format"]["type"], "json_schema")
+        instructions = body["instructions"]
+        self.assertIn("readable and executable but not writable", instructions)
+        self.assertIn("two-pass layout", instructions)
+        self.assertIn("decode them again from entry_offset", instructions)
+        self.assertIn("restore that exact state on every exit", instructions)
+        self.assertIn("SYSCALL clobbers RCX and R11", instructions)
         self.assertEqual(manifest.shellcode, bytes.fromhex(HELLO_HEX))
 
     def test_streams_reasoning_summary_and_returns_completed_response(self):
@@ -467,6 +485,27 @@ class CliTests(unittest.TestCase):
         args = compiler_cli.build_parser().parse_args(["print hello"])
 
         self.assertEqual(args.timeout, 900)
+        self.assertEqual(args.verify_passes, 1)
+
+    def test_prompt_generation_runs_independent_review(self):
+        manifest = compiler.Manifest.from_mapping(hello_mapping())
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "reviewed"
+            with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+                with mock.patch.object(
+                    compiler_cli,
+                    "request_manifest",
+                    side_effect=[manifest, manifest],
+                ) as request_manifest:
+                    result = compiler_cli.main(
+                        ["print hello", "-o", str(output), "--quiet"]
+                    )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(request_manifest.call_count, 2)
+        self.assertEqual(request_manifest.call_args_list[0].args[0], "print hello")
+        review_prompt = request_manifest.call_args_list[1].args[0]
+        self.assertIn("INDEPENDENT BYTECODE VERIFICATION PASS 1", review_prompt)
 
     def test_missing_api_key_explains_how_to_configure_it(self):
         env = os.environ.copy()

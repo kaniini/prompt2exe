@@ -52,6 +52,12 @@ initial throbber.
 The API socket timeout defaults to 15 minutes for complex reasoning requests;
 use `--timeout SECONDS` to increase it further.
 
+Prompt builds use one independent model verification pass by default. The
+reviewer decodes the candidate bytes, recomputes branch targets, and may replace
+an implementation it cannot prove correct. This doubles model requests and
+token use. Use `--verify-passes 0` for the original single-call behavior, or up
+to `--verify-passes 3` for especially difficult programs.
+
 An offline manifest mode makes byte wrapping deterministic and does not require
 network access:
 

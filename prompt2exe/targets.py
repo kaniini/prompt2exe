@@ -62,19 +62,26 @@ TARGET_INSTRUCTIONS = {
 Target: Linux x86-64, little-endian. Use the Linux x86-64 syscall ABI: syscall
 number in RAX, arguments in RDI, RSI, RDX, R10, R8, R9, and SYSCALL. At entry,
 RSP contains argc, argv, and envp; other registers are undefined. Use
-RIP-relative addressing for embedded data.
+RIP-relative addressing for embedded data. SYSCALL clobbers RCX and R11; do not
+depend on condition flags across a syscall. Treat results in the Linux -errno
+range as failures. Clear the direction flag before string instructions and do
+not require ISA extensions beyond the x86-64 baseline.
 """,
     "aarch64-linux": """\
 Target: Linux AArch64, little-endian A64 instructions. Use the Linux AArch64
 syscall ABI: syscall number in X8, arguments in X0 through X5, and SVC #0. At
 entry, SP contains argc, argv, and envp; other registers are undefined. Keep
-instructions 4-byte aligned and use ADR/ADRP or literal addressing correctly.
+SP 16-byte aligned, keep instructions 4-byte aligned, treat Linux -errno
+results as failures, and use ADR/ADRP or literal addressing with fully checked
+page and immediate ranges.
 """,
     "arm-linux": """\
 Target: Linux 32-bit Arm EABI, little-endian ARM instruction state (not Thumb).
 Use R7 for the syscall number, R0 through R6 for arguments, and SVC #0. At
 entry, SP contains argc, argv, and envp; other registers are undefined. Keep
-instructions 4-byte aligned and account for the ARM PC pipeline in data access.
+instructions 4-byte aligned, treat Linux -errno results as failures, account
+for the ARM PC pipeline in data access, and do not emit Thumb instructions or
+optional architecture extensions.
 """,
     "x86_64-windows": """\
 Target: 64-bit Windows x64 using the Microsoft x64 ABI. The PE has no import
@@ -82,21 +89,27 @@ table. Do not use unstable hard-coded Windows syscall numbers: resolve required
 Win32 APIs from the PEB and module export tables inside the payload. Preserve
 nonvolatile registers, maintain 16-byte stack alignment, reserve 32 bytes of
 shadow space before calls, and terminate through a resolved ExitProcess. Use
-RIP-relative addressing for embedded data.
+RIP-relative addressing for embedded data. Validate PE/export bounds while
+resolving names and handle forwarded exports or resolve the implementation from
+the module that actually owns it. Treat payload data as read-only and use the
+stack or a resolved allocator for mutable state.
 """,
     "x86_64-macos": """\
 Target: macOS x86-64 using the Darwin syscall ABI and position-independent
 code. The Mach-O image has no imported symbols. For BSD syscalls, place the
 0x02000000 syscall class plus syscall number in RAX, arguments in RDI, RSI,
 RDX, R10, R8, and R9, then use SYSCALL. Use RIP-relative embedded data and
-terminate with the Darwin exit syscall.
+terminate with the Darwin exit syscall. SYSCALL clobbers RCX and R11; check the
+Darwin carry-flag error convention rather than assuming Linux-style negative
+errno results. Keep stack alignment valid for every helper call.
 """,
     "aarch64-macos": """\
 Target: macOS Apple Silicon using little-endian AArch64 instructions and
 position-independent code. The Mach-O image has no imported symbols. Use the
 Darwin ARM64 BSD syscall convention with the syscall number in X16, arguments
 in X0 onward, and SVC #0x80. Keep instructions 4-byte aligned and terminate
-with the Darwin exit syscall.
+with the Darwin exit syscall. Check the Darwin carry-flag error convention,
+keep SP 16-byte aligned, and verify every ADR/ADRP, literal, and branch range.
 """,
 }
 
