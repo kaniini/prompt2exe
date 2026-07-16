@@ -1,0 +1,29 @@
+{
+  "architecture": "x86_64-linux",
+  "chunks": [
+    {
+      "label": "entry",
+      "kind": "code",
+      "hex": "b801000000bf01000000488d3500000000"
+    },
+    {
+      "label": "write_and_exit",
+      "kind": "code",
+      "hex": "ba0b0000000f05b83c00000031ff0f05"
+    },
+    {
+      "label": "message",
+      "kind": "data",
+      "hex": "68656c6c6f20776f726c64"
+    }
+  ],
+  "entry": "entry",
+  "fixups": [
+    {
+      "source": "entry",
+      "kind": "x86_rip_rel32",
+      "target": "message"
+    }
+  ],
+  "description": "Writes exactly 'hello world' to stdout and exits with status 0."
+}
